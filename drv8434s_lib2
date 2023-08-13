@@ -1,0 +1,255 @@
+#include "xc.h"
+#include "mcc_generated_files/pin_manager.h"
+#include "mcc_generated_files/spi1.h"
+#include "drv8434s_RegMap.h"
+#include "drv8434s.h"
+
+
+
+volatile DRV8434S_REG_t getDriverReg;
+UINT16_T SPI_STEP_DIR; // variable for STEP/DIR control over SPI
+UINT16_T MICROSTEP_MODE; // Microstep mode bits to store microstepping setting
+
+VOID_T drv8434s_init(VOID_T) {
+    //config  STEP , DIR , ENABLE , nSLEEP Pins >>   OUTPUT
+    //except nFAULT >> input , high
+    // nSLEEP low, DIR low, STEP low
+
+    //   set_ENABLE_lo;                                                   // DRV outputs disabled
+    // _delay_cycles(8000);                                             // delay for settling time
+
+}
+/*
+ * (SPI) Communication
+ * full duplex, 
+ * 4-wire synchronous communication. 
+ * >>>> ? One target device
+ * SPI Format
+ * The SDI input data word is 16 bits long,
+ *  and consists of the following format:
+ *         ? 1 read or write bit, W (bit 14)
+ *         ? 5 address bits, A (bits 13 through 9)
+ *         ? 8 data bits, D (bits 7 through 0)
+ */
+
+/*
+ * ==================================================================================================
+ * Register format | 0 | R/W | A4 | A3 | A2 | A1 | A0 | x | D7 | D6 | D5 | D4 | D3 | D2 | D1 | D0 |
+ * Ax : address bit, 
+ * Dx : data bits and 
+ * R/W is read write bit.
+ * For read R/W bit should be 1.
+ * ==================================================================================================
+ */
+
+UINT16_T Read_Register(UINT8_T address) {
+    volatile UINT16_T reg_value = 0;
+    volatile UINT8_T reg_data = 0;
+    SPI1_Open(SPI1_DEFAULT);
+    IO_RF4_SetLow();
+    reg_value |= READ_OPERATION | (address << 9);
+    reg_data = SPI1_ExchangeByte(reg_value);
+    reg_data &= 0x00FF;
+    IO_RF4_SetHigh();
+    __delay_us(10);
+    SPI1_Close();
+    return 0;
+}
+
+/*
+ * ==================================================================================================
+ * Register format >>  | 0 | R/W | A4 | A3 | A2 | A1 | A0 | x | D7 | D6 | D5 | D4 | D3 | D2 | D1 | D0 |
+ * Ax : address bit, 
+ * Dx : data bits and 
+ * R/W is read write bit.
+ * For write R/W bit should 0.
+ * ==================================================================================================
+ */
+UINT16_T Write_Register(UINT8_T address, UINT16_T data) {
+    volatile UINT16_T reg_value = 0;
+    volatile UINT8_T MSB = 0;
+    volatile UINT8_T LSB = 0;
+    reg_value |= ((address << 9) & 0x3F00); // Adding register address value
+    reg_value |= ((data << 0x0) & 0x00FF); // Adding data value 
+    SPI1_Open(SPI1_DEFAULT);
+    IO_RF4_SetLow(); // SPI set 
+    MSB = (UINT8_T) ((reg_value >> 8) & 0xFF);
+    SPI1_ExchangeByte(MSB); // Transmit first Byte,MSB-Byte
+    __delay_us(10);
+    LSB = (UINT8_T) (reg_value & 0xFF);
+    SPI1_ExchangeByte(LSB); // Transmit Second Byte, LSB-Byte   
+    __delay_us(10);
+    IO_RF4_SetHigh(); // SPI Reset
+    __delay_us(10);
+    SPI1_Close();
+    return 0;
+}
+
+VOID_T Set_Default_Registers(VOID_T) {
+
+    // Write Control Register Values with default values
+    getDriverReg.ctrl1_reg |= 0x00; /* CTRL1 register*/
+    Write_Register((uint8_t) REG_CTRL1, (uint16_t) getDriverReg.ctrl1_reg);
+
+    getDriverReg.ctrl2_reg |= 0x0F; /* CTRL2 register*/
+    Write_Register((uint8_t) REG_CTRL2, (uint16_t) getDriverReg.ctrl2_reg);
+
+    getDriverReg.ctrl3_reg |= 0x06; /* CTRL3 register*/
+    Write_Register((uint8_t) REG_CTRL3, (uint16_t) getDriverReg.ctrl3_reg);
+
+    getDriverReg.ctrl4_reg |= 0x30; /* CTRL4 register*/
+    Write_Register((uint8_t) REG_CTRL4, (uint16_t) getDriverReg.ctrl4_reg);
+
+    getDriverReg.ctrl5_reg |= 0x08; /* CTRL5 register*/
+    Write_Register((uint8_t) REG_CTRL5, (uint16_t) getDriverReg.ctrl5_reg);
+
+    getDriverReg.ctrl6_reg |= 0x03; /* CTRL6 register*/
+    Write_Register((uint8_t) REG_CTRL6, (uint16_t) getDriverReg.ctrl6_reg);
+
+    getDriverReg.ctrl7_reg |= 0x20; /* CTRL7 register*/
+    Write_Register((uint8_t) REG_CTRL7, (uint16_t) getDriverReg.ctrl7_reg);
+
+    /* CTRL8 register >> CTRL8 = 0b11111111;  //0xFF [read only] */
+    /* CTRL9 register >> CTRL9 = 0b00001111;  //0x0F [read only]*/
+}
+
+VOID_T drv8434s_read_config(VOID_T) {
+    getDriverReg.fault_status_reg = Read_Register((uint8_t)REG_FAULT_STATUS);
+    getDriverReg.diag_status1_reg = Read_Register((uint8_t)REG_DIAG_STATUS_1);
+    getDriverReg.diag_status2_reg = Read_Register((uint8_t)REG_DIAG_STATUS_2);
+    getDriverReg.ctrl1_reg = Read_Register((uint8_t)REG_CTRL1);
+    getDriverReg.ctrl2_reg = Read_Register((uint8_t)REG_CTRL2);
+    getDriverReg.ctrl3_reg = Read_Register((uint8_t)REG_CTRL3);
+    getDriverReg.ctrl4_reg = Read_Register((uint8_t)REG_CTRL4);
+    getDriverReg.ctrl5_reg = Read_Register((uint8_t)REG_CTRL5);
+    getDriverReg.ctrl6_reg = Read_Register((uint8_t)REG_CTRL6);
+    getDriverReg.ctrl6_reg = Read_Register((uint8_t)REG_CTRL7);
+    getDriverReg.ctrl8_reg = Read_Register((uint8_t)REG_CTRL8);
+    getDriverReg.ctrl9_reg = Read_Register((uint8_t)REG_CTRL9);
+}
+
+// Clear Fault by CLR_FLT in CTRL4 Register
+
+VOID_T Clear_Faults(VOID_T) {
+
+    getDriverReg.ctrl4_reg |= CLR_FLT_MASK; //Write '1' to this bit to clear all latched fault bits. 
+    Write_Register((uint8_t) REG_CTRL4, (uint16_t) getDriverReg.ctrl4_reg);
+
+}
+
+VOID_T Enable_Driver(VOID_T) {
+    getDriverReg.ctrl2_reg |= EN_OUT_MASK;
+    Write_Register(REG_CTRL2, getDriverReg.ctrl2_reg);
+}
+
+VOID_T Disable_Driver(VOID_T) {
+    getDriverReg.ctrl2_reg &= ~(EN_OUT_MASK);
+    Write_Register(REG_CTRL2, getDriverReg.ctrl2_reg);
+}
+
+// ### A simple SPI interface with STEP/DIR pins allows an external controller to manage the direction and step rate of the stepper motor.###
+//// set SPI_DIR and SPI_STEP bits to control DRV8434S over SPI
+//STEP bit low By Default ,The driver automatically clears the STEP bit after it is written.
+//set STEP bit
+
+VOID_T Enable_Step_Bit(VOID_T) {
+    getDriverReg.ctrl3_reg |= STEP_MASK;
+    Write_Register(REG_CTRL3, getDriverReg.ctrl3_reg);
+}
+
+// Enables direction control through SPI (SPI_DIR = 1), allowing setDirection() to override the DIR pin.
+
+VOID_T Enable_SPI_Dir(VOID_T) {
+    getDriverReg.ctrl3_reg |= SPI_DIR_MASK;
+    Write_Register(REG_CTRL3, getDriverReg.ctrl3_reg);
+}
+
+// Disables direction control through SPI (SPI_DIR = 0), making the DIR pin control direction instead.
+
+VOID_T Disable_SPI_Dir(VOID_T) {
+    getDriverReg.ctrl3_reg &= ~(SPI_DIR_MASK);
+    Write_Register(REG_CTRL3, getDriverReg.ctrl3_reg);
+}
+
+// Enables stepping through SPI (SPI_STEP = 1), allowing step() to override the STEP pin.
+
+VOID_T Enable_SPI_Step(VOID_T) {
+    getDriverReg.ctrl3_reg |= SPI_STEP_MASK;
+    Write_Register(REG_CTRL3, getDriverReg.ctrl3_reg);
+}
+
+// Disables stepping through SPI (SPI_STEP = 0), making the STEP pin control stepping instead.
+
+VOID_T Disable_SPI_Step(VOID_T) {
+    getDriverReg.ctrl3_reg |= SPI_STEP_MASK;
+    Write_Register(REG_CTRL3, getDriverReg.ctrl3_reg);
+}
+
+// Sets the motor direction (DIR) >>>>> Allowed values are 0 or 1.
+// You must first call enableSPIDirection() to allow the direction to be controlled through SPI.  
+//enableSPIDirection() >> can use this command to control the direction of the stepper motor and leave the DIR pin disconnected.
+
+VOID_T Set_Direction(bool value) {
+    if (value) {
+        getDriverReg.ctrl3_reg |= DIR_MASK;
+        Write_Register(REG_CTRL3, getDriverReg.ctrl3_reg);
+
+    } else {
+        getDriverReg.ctrl3_reg &= ~(DIR_MASK);
+        Write_Register(REG_CTRL3, getDriverReg.ctrl3_reg);
+    }
+}
+
+//The MICROSTEP_MODE bits in the SPI register are used to configure the step mode
+
+VOID_T Set_Stepping_Mode(UINT8_T mode) {
+    switch (mode) {
+        case 0: getDriverReg.ctrl3_reg |= MicroStep1_100 & 0x0F;
+            break;
+        case 1: getDriverReg.ctrl3_reg |= MicroStep1 & 0x0F;
+            break;
+        case 2: getDriverReg.ctrl3_reg |= MicroStep2 & 0x0F;
+            break;
+        case 3: getDriverReg.ctrl3_reg |= MicroStep2_NC & 0x0F;
+            break;
+        case 4: getDriverReg.ctrl3_reg |= MicroStep4 & 0x0F;
+            break;
+        case 8: getDriverReg.ctrl3_reg |= MicroStep8 & 0x0F;
+            break;
+        case 16: getDriverReg.ctrl3_reg |= MicroStep16 & 0x0F;
+            break;
+        case 32: getDriverReg.ctrl3_reg |= MicroStep32 & 0x0F;
+            break;
+        case 64: getDriverReg.ctrl3_reg |= MicroStep64 & 0x0F;
+            break;
+        case 128: getDriverReg.ctrl3_reg |= MicroStep128 & 0x0F;
+            break;
+        case 256: getDriverReg.ctrl3_reg |= MicroStep256 & 0x0F;
+            break;
+        default: getDriverReg.ctrl3_reg |= MicroStep16 & 0x0F; // Invalid mode; pick 1/16 micro-step by default.  
+            break;
+    }
+    MICROSTEP_MODE = getDriverReg.ctrl3_reg;
+    Write_Register(REG_CTRL3, MICROSTEP_MODE);
+}
+
+UINT8_T Read_Fault(VOID_T) {
+    Read_Register(REG_FAULT_STATUS);
+    return (getDriverReg.fault_status_reg);
+}
+
+UINT8_T Read_Diag_STATUS_1(VOID_T) {
+    Read_Register(REG_DIAG_STATUS_1);
+    return (getDriverReg.diag_status1_reg);
+}
+
+UINT8_T Read_Diag_STATUS_2(VOID_T) {
+    Read_Register(REG_DIAG_STATUS_2);
+    return (getDriverReg.diag_status2_reg);
+}
+
+
+
+
+
+
